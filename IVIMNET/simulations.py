@@ -61,6 +61,12 @@ def sim(SNR, arg):
                                              fmax=arg.sim.range[1][1], Dsmin=arg.sim.range[0][2],
                                              Dsmax=arg.sim.range[1][2], rician=arg.sim.rician)
         dims=4
+    elif arg.fit.model == 'ballistic':
+        IVIM_signal_noisy, D, f, Dp = sim_signal(SNR, arg.sim.bvalues, sims=arg.sim.sims, Dmin=arg.sim.range[0][0],
+                                             Dmax=arg.sim.range[1][0], fmin=arg.sim.range[0][1],
+                                             fmax=arg.sim.range[1][1], Dsmin=arg.sim.range[0][2],
+                                             Dsmax=arg.sim.range[1][2], rician=arg.sim.rician, ballistic=True)
+        dims=4
     else:
         IVIM_signal_noisy, D, f, Dp, f2, Dp2 = sim_signal(SNR, arg.sim.bvalues, sims=arg.sim.sims, Dmin=arg.sim.range[0][0],
                                                  Dmax=arg.sim.range[1][0], fmin=arg.sim.range[0][1],
@@ -112,20 +118,20 @@ def sim(SNR, arg):
             matNN = np.zeros([arg.sim.repeats, 3, dims-1])
             for aa in range(arg.sim.repeats):
                 # determine errors and Spearman Rank
-                if arg.fit.model == 'bi-exp':
+                if arg.fit.model == 'bi-exp' or arg.fit.model == 'ballistic':
                     matNN[aa] = print_errors(np.squeeze(D), np.squeeze(f), np.squeeze(Dp), paramsNN[aa])
                 else:
                     matNN[aa] = print_errors(np.squeeze(D), np.squeeze(f), np.squeeze(Dp), paramsNN[aa],np.squeeze(f2),np.squeeze(Dp2))
             matNN = np.mean(matNN, axis=0)
             # calculate Stability Factor
             stability = np.sqrt(np.mean(np.square(np.std(paramsNN, axis=0)), axis=1))
-            if arg.fit.model == 'bi-exp':
+            if arg.fit.model == 'bi-exp' or arg.fit.model == 'ballistic':
                 stability = stability[[0, 1, 2]] / [np.mean(D), np.mean(f), np.mean(Dp)]
             else:
                 stability = stability[[0, 1, 2, 3 ,4]] / [np.mean(D), np.mean(f), np.mean(Dp), np.mean(f2), np.mean(Dp2)]
             # set paramsNN for the plots
         else:
-            if arg.fit.model == 'bi-exp':
+            if arg.fit.model == 'bi-exp' or arg.fit.model == 'ballistic':
                 matNN = print_errors(np.squeeze(D), np.squeeze(f), np.squeeze(Dp), paramsNN)
             else:
                 matNN = print_errors(np.squeeze(D), np.squeeze(f), np.squeeze(Dp), paramsNN,np.squeeze(f2),np.squeeze(Dp2))
@@ -145,7 +151,7 @@ def sim(SNR, arg):
         print('\ntime elapsed for fit: {}\n'.format(elapsed_time))
         print('results for fit')
         # determine errors and Spearman Rank
-        if arg.fit.model == 'bi-exp':
+        if arg.fit.model == 'bi-exp' or arg.fit.model == 'ballistic':
             matlsq = print_errors(np.squeeze(D), np.squeeze(f), np.squeeze(Dp), paramsf)
         else:
             matlsq = print_errors(np.squeeze(D), np.squeeze(f), np.squeeze(Dp), paramsf, np.squeeze(f2), np.squeeze(Dp2))
@@ -300,7 +306,7 @@ def augmented_signal(data, bvalues, arg, fraction=0.3, Dmin=0.3 / 1000, Dmax=4.0
 
 
 def sim_signal(SNR, bvalues, sims=100000, Dmin=0.5 / 1000, Dmax=5.0 / 1000, fmin=0.0, fmax=0.7, Dsmin=0.05, Dsmax=0.3,fp2min=0, fp2max=0.3,Ds2min=0.2,Ds2max=0.5,
-               rician=False, state=123, bi_exp=True):
+               rician=False, state=123, bi_exp=True, ballistic=False, cvalues=None):
     """
     This simulates IVIM curves. Data is simulated by randomly selecting a value of D, f and D* from within the
     predefined range.
@@ -333,7 +339,7 @@ def sim_signal(SNR, bvalues, sims=100000, Dmin=0.5 / 1000, Dmax=5.0 / 1000, fmin
     f = fmin + (test * (fmax - fmin))
     test = rg.uniform(0, 1, (sims, 1))
     Dp = Dsmin + (test * (Dsmax - Dsmin))
-    if not bi_exp:
+    if not bi_exp and not ballistic:
         test = rg.uniform(0, 1, (sims, 1))
         f2 = fp2min + (test * (fp2max - fp2min))
         test = rg.uniform(0, 1, (sims, 1))
@@ -355,7 +361,7 @@ def sim_signal(SNR, bvalues, sims=100000, Dmin=0.5 / 1000, Dmax=5.0 / 1000, fmin
 
     # loop over array to fill with simulated IVIM data
     for aa in range(len(D)):
-        if bi_exp:
+        if bi_exp or ballistic:
             data_sim[aa, :] = fit.ivim(bvalues, D[aa][0], f[aa][0], Dp[aa][0], 1)
         else:
             data_sim[aa, :] = fit.tri_exp(bvalues, 1-f[aa][0]-f2[aa][0], D[aa][0], f[aa][0], Dp[aa][0], f2[aa][0], Dp2[aa][0])
@@ -381,7 +387,7 @@ def sim_signal(SNR, bvalues, sims=100000, Dmin=0.5 / 1000, Dmax=5.0 / 1000, fmin
     # normalise signal
     S0_noisy = np.mean(data_sim[:, bvalues == 0], axis=1)
     data_sim = data_sim / S0_noisy[:, None]
-    if bi_exp:
+    if bi_exp or ballistic:
         return data_sim, D, f, Dp
     else:
         return data_sim, D, f, Dp, f2, Dp2
@@ -480,15 +486,15 @@ def sim_signal_predict(arg, SNR):
     for i in range(sx):
         for j in range(sy):
             if (40 < i < 60) and (40 < j < 60):
-                # region 0
+                # region0
                 dwi_image[i, j, :] = fit.ivim(arg.sim.bvalues, Dt_region0, Fp_region0, Dp_region0, S0_region0)
                 Dp_truth[i, j], Dt_truth[i, j], Fp_truth[i, j] = Dp_region0, Dt_region0, Fp_region0
             elif (20 < i < 80) and (20 < j < 80):
-                # region 1
+                # region1
                 dwi_image[i, j, :] = fit.ivim(arg.sim.bvalues, Dt_region1, Fp_region1, Dp_region1, S0_region1)
                 Dp_truth[i, j], Dt_truth[i, j], Fp_truth[i, j] = Dp_region1, Dt_region1, Fp_region1
             else:
-                # region 2
+                # region2
                 dwi_image[i, j, :] = fit.ivim(arg.sim.bvalues, Dt_region2, Fp_region2, Dp_region2, S0_region2)
                 Dp_truth[i, j], Dt_truth[i, j], Fp_truth[i, j] = Dp_region2, Dt_region2, Fp_region2
 

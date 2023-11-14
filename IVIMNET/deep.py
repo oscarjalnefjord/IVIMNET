@@ -33,7 +33,7 @@ import warnings
 # Define the neural network.
 
 class Net(nn.Module):
-    def __init__(self, bvalues, net_pars):
+    def __init__(self, bvalues, net_pars, cvalues=None):
         """
         this defines the Net class which is the network we want to train.
         :param bvalues: a 1D array with the b-values
@@ -55,7 +55,7 @@ class Net(nn.Module):
         super(Net, self).__init__()
         self.bvalues = bvalues
         self.net_pars = net_pars
-        if self.net_pars.width is 0:
+        if self.net_pars.width == 0:
             self.net_pars.width = len(bvalues)
         # define number of parameters being estimated
         if self.net_pars.tri_exp:
@@ -73,6 +73,8 @@ class Net(nn.Module):
             if self.net_pars.tri_exp:
                 self.fc_layers4 = nn.ModuleList()
                 self.fc_layers5 = nn.ModuleList()
+        if self.net_pars.ballistic:
+            self.cvalues = cvalues
 
         # loop over the layers
         width = len(bvalues)
@@ -107,7 +109,7 @@ class Net(nn.Module):
                     self.fc_layers4.extend([nn.ELU()])
                     self.fc_layers5.extend([nn.ELU()])
             # if dropout is desired, add dropout regularisation
-            if self.net_pars.dropout is not 0 and i is not (self.net_pars.depth - 1):
+            if self.net_pars.dropout != 0 and i != (self.net_pars.depth - 1):
                 self.fc_layers0.extend([nn.Dropout(self.net_pars.dropout)])
                 if self.net_pars.parallel != 'single':
                     self.fc_layers1.extend([nn.Dropout(self.net_pars.dropout)])
@@ -315,6 +317,12 @@ class Net(nn.Module):
             else:
                 X_temp.append((Fp * torch.exp(-self.bvalues * Dp) + Fp2 * torch.exp(-self.bvalues * Dp2) +
                                     (1 - Fp - Fp2) * torch.exp(-self.bvalues * Dt)))
+        elif self.net_pars.ballistic:
+            Db = 1.75e-3
+            if self.net_pars.fitS0:
+                X_temp.append((Fp * torch.exp(-self.bvalues * Db - self.cvalues**2 * Dp) + f0 * torch.exp(-self.bvalues * Dt)))
+            else:
+                X_temp.append((Fp * torch.exp(-self.bvalues * Db - self.cvalues**2 * Dp) + (1 - Fp) * torch.exp(-self.bvalues * Dt)))
         else:
             if self.net_pars.fitS0:
                 X_temp.append((Fp * torch.exp(-self.bvalues * Dp) + f0 * torch.exp(-self.bvalues * Dt)))
@@ -333,7 +341,7 @@ class Net(nn.Module):
                 return X, Dt, Fp, Dp, torch.ones(len(Dt))
 
 
-def learn_IVIM(X_train, bvalues, arg, net=None):
+def learn_IVIM(X_train, bvalues, arg, net=None, cvalues=None):
     """
     This program builds a IVIM-NET network and trains it.
     :param X_train: 2D array of IVIM data we use for training. First axis are the voxels and second axis are the b-values
@@ -360,7 +368,11 @@ def learn_IVIM(X_train, bvalues, arg, net=None):
     # initialising the network of choice using the input argument arg
     if net is None:
         bvalues = torch.FloatTensor(bvalues[:]).to(arg.train_pars.device)
-        net = Net(bvalues, arg.net_pars).to(arg.train_pars.device)
+        if arg.net_pars.ballistic:
+            cvalues = torch.FloatTensor(cvalues[:]).to(arg.train_pars.device)
+            net = Net(bvalues, arg.net_pars, cvalues).to(arg.train_pars.device)
+        else:
+            net = Net(bvalues, arg.net_pars).to(arg.train_pars.device)
     else:
         # if a network was used as input parameter, work with that network instead (transfer learning/warm start).
         net.to(arg.train_pars.device)
@@ -725,7 +737,7 @@ def make_data_complete(dw_data,bvalues,fraction_threshold=0.2):
 
     :return dw_data: corrected dataset
     """
-    if len(np.shape(dw_data)) is 4:
+    if len(np.shape(dw_data)) == 4:
         sx, sy, sz, n_b_values = dw_data.shape
         dw_data = np.reshape(dw_data, (sx * sy * sz, n_b_values))
         reshape = True
@@ -817,6 +829,9 @@ def checkarg_net_pars(arg):
     if not hasattr(arg, 'tri_exp'):
         warnings.warn('arg.net_pars.tri_exp not defined. Using default of False')
         arg.tri_exp = False
+    if not hasattr(arg, 'ballistic'):
+        warnings.warn('arg.net_pars.ballistic not defined. Using default of False')
+        arg.ballistic = False
     if not hasattr(arg,'cons_min'):
         if arg.tri_exp:
             warnings.warn('arg.net_pars.cons_min not defined. Using default values [0., 0.0003, 0.0, 0.003, 0.0, 0.08]')
